@@ -21,6 +21,8 @@ builder.Services.AddScoped<IShipmentQueries, ShipmentQueries>();
 var app = builder.Build();
 
 app.UseHttpsRedirection();
+app.UseDefaultFiles();   // rewrites "/" -> "/index.html"
+app.UseStaticFiles();    // serves everything under wwwroot
 app.UseAuthorization();
 app.MapControllers();
 
