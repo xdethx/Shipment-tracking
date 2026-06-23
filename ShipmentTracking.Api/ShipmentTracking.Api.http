@@ -30,3 +30,9 @@ X-Api-Key: {{apiKey}}
   "newStatus": "InTransit",
   "note": "Cleared for customs inspection"
 }
+
+###
+
+### Public tracking lookup — no API key required (anonymous)
+### Replace TR20260623-7MZZR5 with the tracking number from the POST response above
+GET {{host}}/api/track/TR20260623-7MZZR5

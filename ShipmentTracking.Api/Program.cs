@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using ShipmentTracking.Core.Interfaces;
 using ShipmentTracking.Core.Services;
 using ShipmentTracking.Infrastructure.Data;
+using ShipmentTracking.Infrastructure.Queries;
 using ShipmentTracking.Infrastructure.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,6 +16,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddScoped<IShipmentRepository, ShipmentRepository>();
 builder.Services.AddScoped<IShipmentService, ShipmentService>();
+builder.Services.AddScoped<IShipmentQueries, ShipmentQueries>();
 
 var app = builder.Build();
 
