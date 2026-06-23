@@ -1,0 +1,32 @@
+@host = http://localhost:5068
+@apiKey = dev-local-key-9R4mT8Xk
+
+### Create a shipment (POST → 201 Created)
+POST {{host}}/api/shipments
+Content-Type: application/json
+X-Api-Key: {{apiKey}}
+
+{
+  "senderName": "Ahmet Yılmaz",
+  "receiverName": "Fatma Kaya",
+  "origin": "Istanbul",
+  "destination": "Ankara"
+}
+
+###
+
+### List all shipments (GET → 200 OK)
+GET {{host}}/api/shipments
+X-Api-Key: {{apiKey}}
+
+###
+
+### Update status — replace TR20260622-XXXXXX with the tracking number from the POST response
+PUT {{host}}/api/shipments/TR20260623-7MZZR5/status
+Content-Type: application/json
+X-Api-Key: {{apiKey}}
+
+{
+  "newStatus": "InTransit",
+  "note": "Cleared for customs inspection"
+}
