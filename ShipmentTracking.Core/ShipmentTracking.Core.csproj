@@ -6,4 +6,11 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- PasswordHasher<T> / IPasswordHasher<T> — only the hasher, not the full Identity framework -->
+    <PackageReference Include="Microsoft.Extensions.Identity.Core" Version="10.0.9" />
+    <!-- JwtSecurityToken / JwtSecurityTokenHandler / SymmetricSecurityKey etc. -->
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.7.0" />
+  </ItemGroup>
+
 </Project>

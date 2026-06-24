@@ -22,20 +22,13 @@
 </head>
 <body>
   <div class="container admin-wrap">
-    <h1 class="fw-bold mb-1">Admin Panel</h1>
-    <p class="text-muted mb-4">Shipment management — for internal use only.</p>
-
-    <!-- API Key ─────────────────────────────────────────────────────────── -->
-    <div class="card mb-4 border-warning">
-      <div class="card-body">
-        <label for="apiKey" class="form-label fw-semibold">API Key</label>
-        <input id="apiKey"
-               type="password"
-               class="form-control"
-               placeholder="Enter API key (not stored anywhere)"
-               autocomplete="off" />
-        <div class="form-text">Read on every request — never committed or stored.</div>
+    <!-- Header with logout ──────────────────────────────────────────────── -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div>
+        <h1 class="fw-bold mb-0">Admin Panel</h1>
+        <small class="text-muted">Shipment management — for internal use only.</small>
       </div>
+      <button id="logoutBtn" class="btn btn-outline-secondary btn-sm">Log out</button>
     </div>
 
     <!-- Card A — Create shipment ────────────────────────────────────────── -->
@@ -110,7 +103,50 @@
           integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo="
           crossorigin="anonymous"></script>
   <script>
-    // ── Helpers ─────────────────────────────────────────────────────────────
+    // ── Auth helpers ─────────────────────────────────────────────────────────
+    function getToken() {
+      return sessionStorage.getItem('st_token');
+    }
+
+    // Client-side expiry check (convenience only; server re-validates every request).
+    function isTokenExpired(token) {
+      try {
+        var b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+        var payload = JSON.parse(atob(b64));
+        return (Date.now() / 1000) >= payload.exp;
+      } catch (e) {
+        return true;
+      }
+    }
+
+    // Guard: called on page load. Redirects to login if no valid token exists.
+    function checkAuth() {
+      var token = getToken();
+      if (!token || isTokenExpired(token)) {
+        sessionStorage.removeItem('st_token');
+        window.location.href = '/login.html';
+        return null;
+      }
+      return token;
+    }
+
+    // Returns the Authorization header for every admin API call.
+    function authHeaders() {
+      return { 'Authorization': 'Bearer ' + getToken() };
+    }
+
+    // Handle 401 from any admin request — treat as session expired.
+    function handleUnauthorized() {
+      sessionStorage.removeItem('st_token');
+      window.location.href = '/login.html';
+    }
+
+    function logout() {
+      sessionStorage.removeItem('st_token');
+      window.location.href = '/login.html';
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
     function esc(str) {
       return $('<div>').text(String(str)).html();
     }
@@ -121,27 +157,18 @@
 
     function statusBadgeClass(status) {
       switch (status) {
-        case 'Delivered':        return 'bg-success';
-        case 'InTransit':        return 'bg-info text-dark';
-        case 'OutForDelivery':   return 'bg-primary';
-        case 'AtCustoms':        return 'bg-warning text-dark';
-        default:                 return 'bg-secondary'; // Created
+        case 'Delivered':      return 'bg-success';
+        case 'InTransit':      return 'bg-info text-dark';
+        case 'OutForDelivery': return 'bg-primary';
+        case 'AtCustoms':      return 'bg-warning text-dark';
+        default:               return 'bg-secondary'; // Created
       }
-    }
-
-    // Returns the X-Api-Key header object, read fresh from the input each time.
-    function apiHeaders() {
-      return { 'X-Api-Key': $('#apiKey').val() };
     }
 
     function showAlert(containerId, type, html) {
       $('#' + containerId).html(
         '<div class="alert alert-' + type + ' mb-0">' + html + '</div>'
       );
-    }
-
-    function authError(containerId) {
-      showAlert(containerId, 'danger', 'Missing or wrong API key (401).');
     }
 
     // ── Card A — Create shipment ─────────────────────────────────────────────
@@ -162,7 +189,7 @@
         url: '/api/shipments',
         method: 'POST',
         contentType: 'application/json',
-        headers: apiHeaders(),
+        headers: authHeaders(),
         data: JSON.stringify(body)
       })
       .done(function (data, _status, jqXHR) {
@@ -171,14 +198,12 @@
             'Shipment created! Tracking number: ' +
             '<span class="tracking-pill">' + esc(data.trackingNumber) + '</span>'
           );
-          // Clear form
           $('#senderName, #receiverName, #origin, #destination').val('');
         }
       })
       .fail(function (jqXHR) {
-        if (jqXHR.status === 401) {
-          authError('createResult');
-        } else if (jqXHR.status === 400) {
+        if (jqXHR.status === 401) { handleUnauthorized(); return; }
+        if (jqXHR.status === 400) {
           showAlert('createResult', 'danger', 'Validation error: ' + esc(jqXHR.responseText));
         } else {
           showAlert('createResult', 'danger', 'Unexpected error (' + jqXHR.status + ').');
@@ -193,14 +218,13 @@
       $.ajax({
         url: '/api/shipments',
         method: 'GET',
-        headers: apiHeaders()
+        headers: authHeaders()
       })
       .done(function (data) {
         if (!data || data.length === 0) {
           $('#listResult').html('<p class="p-3 text-muted mb-0">No shipments yet.</p>');
           return;
         }
-
         var rows = data.map(function (s) {
           return (
             '<tr>' +
@@ -214,31 +238,23 @@
             '</tr>'
           );
         });
-
         $('#listResult').html(
           '<div class="table-responsive">' +
             '<table class="table table-sm table-hover mb-0">' +
-              '<thead class="table-light">' +
-                '<tr>' +
-                  '<th>Tracking #</th><th>Sender</th><th>Receiver</th>' +
-                  '<th>Origin</th><th>Destination</th><th>Status</th><th>Created</th>' +
-                '</tr>' +
-              '</thead>' +
+              '<thead class="table-light"><tr>' +
+                '<th>Tracking #</th><th>Sender</th><th>Receiver</th>' +
+                '<th>Origin</th><th>Destination</th><th>Status</th><th>Created</th>' +
+              '</tr></thead>' +
               '<tbody>' + rows.join('') + '</tbody>' +
             '</table>' +
           '</div>'
         );
       })
       .fail(function (jqXHR) {
-        if (jqXHR.status === 401) {
-          $('#listResult').html(
-            '<div class="alert alert-danger m-3 mb-0">Missing or wrong API key (401).</div>'
-          );
-        } else {
-          $('#listResult').html(
-            '<div class="alert alert-danger m-3 mb-0">Unexpected error (' + jqXHR.status + ').</div>'
-          );
-        }
+        if (jqXHR.status === 401) { handleUnauthorized(); return; }
+        $('#listResult').html(
+          '<div class="alert alert-danger m-3 mb-0">Unexpected error (' + jqXHR.status + ').</div>'
+        );
       });
     }
 
@@ -260,7 +276,7 @@
         url: '/api/shipments/' + encodeURIComponent(tn) + '/status',
         method: 'PUT',
         contentType: 'application/json',
-        headers: apiHeaders(),
+        headers: authHeaders(),
         data: JSON.stringify(body)
       })
       .done(function (data) {
@@ -270,22 +286,22 @@
         );
       })
       .fail(function (jqXHR) {
+        if (jqXHR.status === 401) { handleUnauthorized(); return; }
         if (jqXHR.status === 400) {
-          // Server returns a plain-text message (not JSON) for invalid transitions.
+          // Server returns plain-text for invalid transitions (BadRequest(ex.Message)).
           showAlert('updateResult', 'danger', esc(jqXHR.responseText));
         } else if (jqXHR.status === 404) {
-          showAlert('updateResult', 'warning',
-            'Tracking number "' + esc(tn) + '" not found.'
-          );
-        } else if (jqXHR.status === 401) {
-          authError('updateResult');
+          showAlert('updateResult', 'warning', 'Tracking number "' + esc(tn) + '" not found.');
         } else {
           showAlert('updateResult', 'danger', 'Unexpected error (' + jqXHR.status + ').');
         }
       });
     }
 
-    // ── Event bindings ───────────────────────────────────────────────────────
+    // ── Initialise ───────────────────────────────────────────────────────────
+    checkAuth(); // redirect to /login.html if no valid token
+
+    $('#logoutBtn').on('click', logout);
     $('#createBtn').on('click', createShipment);
     $('#refreshBtn').on('click', listShipments);
     $('#updateBtn').on('click', updateStatus);
