@@ -26,7 +26,8 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
     if (string.Equals(dbProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
-        options.UseSqlite(connectionString);
+        options.UseSqlite(connectionString,
+            o => o.MigrationsAssembly("ShipmentTracking.Migrations.Sqlite"));
     else
         options.UseSqlServer(connectionString);
 });
