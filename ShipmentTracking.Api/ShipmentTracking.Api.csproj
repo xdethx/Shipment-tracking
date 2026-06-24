@@ -18,6 +18,7 @@
   <ItemGroup>
     <ProjectReference Include="..\ShipmentTracking.Core\ShipmentTracking.Core.csproj" />
     <ProjectReference Include="..\ShipmentTracking.Infrastructure\ShipmentTracking.Infrastructure.csproj" />
+    <ProjectReference Include="..\ShipmentTracking.Migrations.Sqlite\ShipmentTracking.Migrations.Sqlite.csproj" />
   </ItemGroup>
 
 </Project>

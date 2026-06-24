@@ -2,14 +2,15 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Copy solution and project files first so Docker can cache the restore layer.
-# Restore is only re-run when a .csproj or .sln changes, not on every code edit.
-COPY ShipmentTracking.sln ./
-COPY ShipmentTracking.Core/ShipmentTracking.Core.csproj               ShipmentTracking.Core/
-COPY ShipmentTracking.Infrastructure/ShipmentTracking.Infrastructure.csproj ShipmentTracking.Infrastructure/
-COPY ShipmentTracking.Api/ShipmentTracking.Api.csproj                 ShipmentTracking.Api/
+# Copy the three .csproj files into their matching subdirectories so Docker
+# can cache the restore layer separately from the source copy.
+# Restore is only re-run when a .csproj changes, not on every code edit.
+COPY ShipmentTracking.Core/ShipmentTracking.Core.csproj                           ShipmentTracking.Core/
+COPY ShipmentTracking.Infrastructure/ShipmentTracking.Infrastructure.csproj       ShipmentTracking.Infrastructure/
+COPY ShipmentTracking.Migrations.Sqlite/ShipmentTracking.Migrations.Sqlite.csproj ShipmentTracking.Migrations.Sqlite/
+COPY ShipmentTracking.Api/ShipmentTracking.Api.csproj                             ShipmentTracking.Api/
 
-RUN dotnet restore
+RUN dotnet restore ShipmentTracking.Api/ShipmentTracking.Api.csproj
 
 # Copy the rest of the source and publish in Release mode.
 COPY . .

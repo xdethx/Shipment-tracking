@@ -2,4 +2,5 @@
   <Project Path="ShipmentTracking.Api/ShipmentTracking.Api.csproj" />
   <Project Path="ShipmentTracking.Core/ShipmentTracking.Core.csproj" />
   <Project Path="ShipmentTracking.Infrastructure/ShipmentTracking.Infrastructure.csproj" />
+  <Project Path="ShipmentTracking.Migrations.Sqlite/ShipmentTracking.Migrations.Sqlite.csproj" />
 </Solution>
