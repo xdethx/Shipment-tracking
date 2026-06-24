@@ -22,6 +22,36 @@ namespace ShipmentTracking.Infrastructure.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("ShipmentTracking.Core.Entities.AppUser", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Username")
+                        .IsUnique();
+
+                    b.ToTable("Users");
+                });
+
             modelBuilder.Entity("ShipmentTracking.Core.Entities.Shipment", b =>
                 {
                     b.Property<int>("Id")
@@ -62,7 +92,7 @@ namespace ShipmentTracking.Infrastructure.Migrations
                     b.HasIndex("TrackingNumber")
                         .IsUnique();
 
-                    b.ToTable("Shipments", (string)null);
+                    b.ToTable("Shipments");
                 });
 
             modelBuilder.Entity("ShipmentTracking.Core.Entities.ShipmentStatusHistory", b =>
@@ -89,7 +119,7 @@ namespace ShipmentTracking.Infrastructure.Migrations
 
                     b.HasIndex("ShipmentId");
 
-                    b.ToTable("StatusHistories", (string)null);
+                    b.ToTable("StatusHistories");
                 });
 
             modelBuilder.Entity("ShipmentTracking.Core.Entities.ShipmentStatusHistory", b =>

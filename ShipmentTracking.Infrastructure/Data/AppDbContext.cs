@@ -9,6 +9,7 @@ public class AppDbContext : DbContext
 
     public DbSet<Shipment> Shipments => Set<Shipment>();
     public DbSet<ShipmentStatusHistory> StatusHistories => Set<ShipmentStatusHistory>();
+    public DbSet<AppUser> Users => Set<AppUser>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -25,6 +26,23 @@ public class AppDbContext : DbContext
                   .WithOne(h => h.Shipment)
                   .HasForeignKey(h => h.ShipmentId)
                   .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AppUser>(entity =>
+        {
+            entity.Property(u => u.Username)
+                  .HasMaxLength(256)
+                  .IsRequired();
+
+            entity.Property(u => u.PasswordHash)
+                  .IsRequired();
+
+            entity.Property(u => u.Role)
+                  .HasMaxLength(50)
+                  .IsRequired();
+
+            entity.HasIndex(u => u.Username)
+                  .IsUnique();
         });
     }
 }

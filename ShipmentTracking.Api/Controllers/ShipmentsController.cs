@@ -1,5 +1,6 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using ShipmentTracking.Api.Filters;
+using ShipmentTracking.Core.Constants;
 using ShipmentTracking.Core.DTOs;
 using ShipmentTracking.Core.Exceptions;
 using ShipmentTracking.Core.Interfaces;
@@ -8,7 +9,7 @@ namespace ShipmentTracking.Api.Controllers;
 
 [ApiController]
 [Route("api/shipments")]
-[ApiKeyAuthFilter]
+[Authorize(Roles = Roles.Admin)] // requires a valid JWT with role claim "Admin"
 public class ShipmentsController : ControllerBase
 {
     private readonly IShipmentService _shipmentService;

@@ -1,4 +1,10 @@
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using ShipmentTracking.Core.Auth;
+using ShipmentTracking.Core.Entities;
 using ShipmentTracking.Core.Interfaces;
 using ShipmentTracking.Core.Services;
 using ShipmentTracking.Infrastructure.Data;
@@ -17,10 +23,8 @@ builder.Services.AddControllers()
     .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(
         new System.Text.Json.Serialization.JsonStringEnumConverter()));
 
-// Choose the database provider from configuration.
-// Default (unset) = SqlServer (local dev with LocalDB, unchanged).
-// Deployed Render environment sets DatabaseProvider=Sqlite via dashboard env vars.
-var dbProvider = builder.Configuration["DatabaseProvider"] ?? "SqlServer";
+// ── Database provider (SqlServer locally; Sqlite on Render) ───────────────────
+var dbProvider     = builder.Configuration["DatabaseProvider"] ?? "SqlServer";
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -32,24 +36,64 @@ builder.Services.AddDbContext<AppDbContext>(options =>
         options.UseSqlServer(connectionString);
 });
 
+// ── JWT settings ──────────────────────────────────────────────────────────────
+// Jwt:Key is a SECRET — comes from user-secrets locally / Jwt__Key env var on Render.
+// Issuer, Audience, ExpiryHours are non-secret and live in appsettings.json.
+var jwtSettings = builder.Configuration.GetSection("Jwt").Get<JwtSettings>() ?? new JwtSettings();
+if (string.IsNullOrWhiteSpace(jwtSettings.Key))
+    throw new InvalidOperationException(
+        "Jwt:Key is not configured. " +
+        "Run: dotnet user-secrets set \"Jwt:Key\" \"<32+ char random string>\" " +
+        "or set the Jwt__Key environment variable on Render.");
+
+builder.Services.AddSingleton(jwtSettings); // AuthService takes the POCO directly
+
+// ── Authentication + Authorization ───────────────────────────────────────────
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer           = true,
+            ValidateAudience         = true,
+            ValidateLifetime         = true,        // reject expired tokens
+            ValidateIssuerSigningKey = true,        // reject tampered tokens
+            ValidIssuer              = jwtSettings.Issuer,
+            ValidAudience            = jwtSettings.Audience,
+            IssuerSigningKey         = new SymmetricSecurityKey(
+                                           Encoding.UTF8.GetBytes(jwtSettings.Key)),
+            ClockSkew                = TimeSpan.Zero, // no grace period; 8 h means 8 h
+        };
+    });
+builder.Services.AddAuthorization();
+
+// ── DI registrations ─────────────────────────────────────────────────────────
+builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
+
 builder.Services.AddScoped<IShipmentRepository, ShipmentRepository>();
 builder.Services.AddScoped<IShipmentService, ShipmentService>();
 builder.Services.AddScoped<IShipmentQueries, ShipmentQueries>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IAuthService, AuthService>();
 
 var app = builder.Build();
 
-// Apply pending EF Core migrations on startup.
-// On the first container run this creates the SQLite file and the full schema.
-// On subsequent runs EF checks the __EFMigrationsHistory table and is a no-op.
+// ── Startup: migrate + seed ───────────────────────────────────────────────────
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var db      = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var hasher  = scope.ServiceProvider.GetRequiredService<IPasswordHasher<AppUser>>();
+    var config  = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+
     db.Database.Migrate();
+    await AdminUserSeeder.SeedAsync(db, hasher, config);
 }
 
+// ── Middleware pipeline ───────────────────────────────────────────────────────
 app.UseHttpsRedirection();
 app.UseDefaultFiles();   // rewrites "/" -> "/index.html"
 app.UseStaticFiles();    // serves everything under wwwroot
+app.UseAuthentication(); // must come before UseAuthorization
 app.UseAuthorization();
 app.MapControllers();
 
