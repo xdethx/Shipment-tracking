@@ -1,0 +1,14 @@
+**/.git
+**/.vs
+**/.vscode
+**/bin
+**/obj
+**/*.user
+**/*.suo
+journal/
+*.md
+!README.md
+**/appsettings.Development.json
+**/*.db
+**/*.db-shm
+**/*.db-wal
