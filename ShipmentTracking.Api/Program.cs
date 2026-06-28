@@ -1,14 +1,17 @@
+using System.Net.Http.Headers;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using ShipmentTracking.Core.Auth;
+using ShipmentTracking.Core.Configuration;
 using ShipmentTracking.Core.Entities;
 using ShipmentTracking.Core.Interfaces;
 using ShipmentTracking.Core.Services;
 using ShipmentTracking.Infrastructure.Data;
 using ShipmentTracking.Infrastructure.Queries;
+using ShipmentTracking.Infrastructure.Rag;
 using ShipmentTracking.Infrastructure.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -66,6 +69,29 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 builder.Services.AddAuthorization();
+
+// ── RAG settings ─────────────────────────────────────────────────────────────
+// Rag:ApiKey is a SECRET — comes from user-secrets locally / Rag__ApiKey env var on Render.
+// Rag:BaseUrl is non-secret and lives in appsettings.json.
+var ragSettings = builder.Configuration.GetSection("Rag").Get<RagSettings>() ?? new RagSettings();
+if (string.IsNullOrWhiteSpace(ragSettings.BaseUrl))
+    throw new InvalidOperationException(
+        "Rag:BaseUrl is not configured. Add it to appsettings.json.");
+if (string.IsNullOrWhiteSpace(ragSettings.ApiKey))
+    throw new InvalidOperationException(
+        "Rag:ApiKey is not configured. " +
+        "Run: dotnet user-secrets set \"Rag:ApiKey\" \"<your key>\" " +
+        "or set the Rag__ApiKey environment variable on Render.");
+
+// Typed HttpClient: base address and Authorization header set once here;
+// RagClient never touches the key. 100s timeout for cold-starting HF Spaces.
+builder.Services.AddHttpClient<IRagClient, RagClient>(client =>
+{
+    client.BaseAddress = new Uri(ragSettings.BaseUrl.TrimEnd('/') + "/");
+    client.DefaultRequestHeaders.Authorization =
+        new AuthenticationHeaderValue("Bearer", ragSettings.ApiKey);
+    client.Timeout = TimeSpan.FromSeconds(100);
+});
 
 // ── DI registrations ─────────────────────────────────────────────────────────
 builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
