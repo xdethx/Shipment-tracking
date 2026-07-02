@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Customs Assistant — Shipment Tracking</title>
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+        crossorigin="anonymous" />
+  <style>
+    body { background-color: #f8f9fa; }
+    .assistant-wrap { max-width: 680px; margin: 48px auto; }
+
+    /* Scrollable message list; auto-scrolls to the newest message. */
+    #messages {
+      height: 420px;
+      overflow-y: auto;
+      background: #fff;
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .msg { margin-bottom: 14px; }
+    .msg-bubble {
+      display: inline-block;
+      padding: 8px 12px;
+      border-radius: 12px;
+      max-width: 85%;
+      white-space: pre-wrap;      /* keep the RAG answer's line breaks */
+      word-wrap: break-word;
+    }
+    .msg-user  { text-align: right; }
+    .msg-user  .msg-bubble { background: #0d6efd; color: #fff; border-bottom-right-radius: 2px; }
+    .msg-bot   .msg-bubble { background: #e9ecef; color: #212529; border-bottom-left-radius: 2px; }
+    .sources { margin-top: 6px; }
+    .sources .badge { font-weight: 500; }
+  </style>
+</head>
+<body>
+  <div class="container assistant-wrap">
+    <div class="text-center mb-4">
+      <h4 class="fw-bold mb-0">Customs Assistant</h4>
+      <small class="text-muted">Ask about customs statuses, required documents, and delays.</small>
+    </div>
+
+    <!-- ── Start screen: identity form (soft UX gate — NOT a security boundary) ── -->
+    <div id="identityCard" class="card shadow-sm">
+      <div class="card-body p-4">
+        <p class="text-muted small mb-3">
+          Tell us who you are, then start chatting. We don't store any of this.
+        </p>
+        <div class="mb-3">
+          <label for="username" class="form-label">Username</label>
+          <input id="username" type="text" class="form-control" placeholder="Ahmet" />
+        </div>
+        <div class="mb-3">
+          <label for="email" class="form-label">Email</label>
+          <input id="email" type="email" class="form-control" placeholder="ahmet@example.com" />
+        </div>
+        <div class="mb-4">
+          <label for="phone" class="form-label">Phone (GSM)</label>
+          <input id="phone" type="tel" class="form-control" placeholder="+90 5xx xxx xx xx" />
+        </div>
+        <button id="startBtn" class="btn btn-primary w-100">Start chatting</button>
+        <div id="identityResult" class="mt-3"></div>
+      </div>
+    </div>
+
+    <!-- ── Chat panel (revealed after the identity form is valid) ─────────────── -->
+    <div id="chatCard" class="card shadow-sm d-none">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="fw-semibold">Assistant</span>
+        <small id="chatWho" class="text-muted"></small>
+      </div>
+      <div class="card-body">
+        <div id="messages" class="mb-3"></div>
+        <div class="input-group">
+          <input id="chatInput" type="text" class="form-control"
+                 placeholder="e.g. What does CUS-HOLD mean?" autocomplete="off" />
+          <button id="sendBtn" class="btn btn-primary" type="button">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="text-center mt-3">
+      <a href="/" class="text-muted small">← Public tracking page</a>
+    </p>
+  </div>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"
+          integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo="
+          crossorigin="anonymous"></script>
+  <script>
+    // ── Identity held in JS memory ONLY ──────────────────────────────────────
+    // This is a soft UX gate to collect who's asking — it is NOT the security
+    // boundary and is never sent to the server or persisted. The real throttle
+    // is the per-IP rate limit enforced by the API on /api/assistant/ask.
+    var identity = null;
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    // Escape untrusted text before inserting into HTML (prevents XSS). Same
+    // pattern as index.html / admin.html.
+    function esc(str) {
+      return $('<div>').text(String(str)).html();
+    }
+
+    function showAlert(containerId, type, message) {
+      $('#' + containerId).html(
+        '<div class="alert alert-' + type + ' mb-0">' + esc(message) + '</div>'
+      );
+    }
+
+    // Simple, forgiving format checks — enough for a UX gate, not RFC-perfect.
+    function isValidEmail(v) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+    }
+    function isValidPhone(v) {
+      // Allow digits, spaces and + - ( ) ; require 7–15 actual digits.
+      if (!/^[0-9+()\-\s]+$/.test(v)) return false;
+      var digits = v.replace(/\D/g, '');
+      return digits.length >= 7 && digits.length <= 15;
+    }
+
+    // ── Start screen → chat panel ────────────────────────────────────────────
+    function startChat() {
+      var username = $.trim($('#username').val());
+      var email    = $.trim($('#email').val());
+      var phone    = $.trim($('#phone').val());
+
+      if (!username || !email || !phone) {
+        showAlert('identityResult', 'warning', 'Username, email and phone are all required.');
+        return;
+      }
+      if (!isValidEmail(email)) {
+        showAlert('identityResult', 'warning', 'Please enter a valid email address.');
+        return;
+      }
+      if (!isValidPhone(phone)) {
+        showAlert('identityResult', 'warning', 'Please enter a valid phone number.');
+        return;
+      }
+
+      identity = { username: username, email: email, phone: phone };
+
+      // Reveal the chat panel; hide the identity form.
+      $('#identityCard').addClass('d-none');
+      $('#chatCard').removeClass('d-none');
+      $('#chatWho').text('Signed in as ' + username);
+      $('#chatInput').trigger('focus');
+    }
+
+    // ── Rendering messages ───────────────────────────────────────────────────
+    function scrollToBottom() {
+      var el = document.getElementById('messages');
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function appendUserMessage(text) {
+      $('#messages').append(
+        '<div class="msg msg-user"><div class="msg-bubble">' + esc(text) + '</div></div>'
+      );
+      scrollToBottom();
+    }
+
+    // Append the assistant's answer plus its sources. Returns nothing; the
+    // sources are the source documents the RAG service used to ground the answer
+    // — showing them is the whole point of retrieval-augmented generation.
+    function appendBotMessage(answer, sources) {
+      var sourcesHtml = '';
+      if (sources && sources.length) {
+        // De-duplicate document names (the same file can back several chunks).
+        // NOTE: verified against the live API — each element's field is `source`.
+        var seen = {};
+        var badges = [];
+        sources.forEach(function (s) {
+          var name = s && s.source ? s.source : '';
+          if (name && !seen[name]) {
+            seen[name] = true;
+            badges.push('<span class="badge text-bg-light border me-1 mb-1">' + esc(name) + '</span>');
+          }
+        });
+        if (badges.length) {
+          sourcesHtml =
+            '<div class="sources"><small class="text-muted d-block mb-1">Sources:</small>' +
+            badges.join('') + '</div>';
+        }
+      }
+
+      $('#messages').append(
+        '<div class="msg msg-bot">' +
+          '<div class="msg-bubble">' + esc(answer) + '</div>' +
+          sourcesHtml +
+        '</div>'
+      );
+      scrollToBottom();
+    }
+
+    // A temporary "thinking" bubble with a spinner. Returned jQuery element is
+    // removed once the response (or error) arrives. The free RAG Space can be
+    // slow on a cold start, so we keep a patient timeout on the request.
+    function appendThinking() {
+      var $el = $(
+        '<div class="msg msg-bot">' +
+          '<div class="msg-bubble">' +
+            '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>' +
+            'Assistant is thinking…' +
+          '</div>' +
+        '</div>'
+      );
+      $('#messages').append($el);
+      scrollToBottom();
+      return $el;
+    }
+
+    // ── Send a question ──────────────────────────────────────────────────────
+    function sendMessage() {
+      var question = $.trim($('#chatInput').val());
+      if (!question) { return; }
+
+      appendUserMessage(question);
+      $('#chatInput').val('');
+      $('#sendBtn').prop('disabled', true);
+      var $thinking = appendThinking();
+
+      // The UI talks ONLY to our own .NET endpoint — never the RAG service
+      // directly — so the RAG key stays server-side.
+      $.ajax({
+        url: '/api/assistant/ask',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ question: question }),
+        timeout: 100000 // match the server's 100s RAG timeout (cold Space)
+      })
+      .done(function (data) {
+        $thinking.remove();
+        appendBotMessage(data.answer, data.sources);
+      })
+      .fail(function (jqXHR, textStatus) {
+        $thinking.remove();
+        var message;
+        if (jqXHR.status === 429) {
+          message = "You're sending messages too fast, please wait a moment.";
+        } else if (jqXHR.status === 502 || jqXHR.status === 503) {
+          message = 'Assistant is temporarily unavailable, try again shortly.';
+        } else if (textStatus === 'timeout' || jqXHR.status === 0) {
+          message = 'Assistant is temporarily unavailable, try again shortly.';
+        } else {
+          message = 'Something went wrong. Please try again.';
+        }
+        // Render errors as a normal bot bubble — never surface a raw error.
+        $('#messages').append(
+          '<div class="msg msg-bot"><div class="msg-bubble text-danger">' + esc(message) + '</div></div>'
+        );
+        scrollToBottom();
+      })
+      .always(function () {
+        $('#sendBtn').prop('disabled', false);
+        $('#chatInput').trigger('focus');
+      });
+    }
+
+    // ── Event bindings ───────────────────────────────────────────────────────
+    $('#startBtn').on('click', startChat);
+    $('#phone').on('keydown', function (e) { if (e.key === 'Enter') { startChat(); } });
+
+    $('#sendBtn').on('click', sendMessage);
+    $('#chatInput').on('keydown', function (e) { if (e.key === 'Enter') { sendMessage(); } });
+  </script>
+</body>
+</html>

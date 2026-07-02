@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using ShipmentTracking.Core.DTOs;
 using ShipmentTracking.Core.Interfaces;
 using ShipmentTracking.Infrastructure.Exceptions;
@@ -8,7 +9,8 @@ namespace ShipmentTracking.Api.Controllers;
 
 [ApiController]
 [Route("api/assistant")]
-[AllowAnonymous] // public customs assistant — anyone may ask questions
+[AllowAnonymous]                  // public customs assistant — anyone may ask questions
+[EnableRateLimiting("assistant")] // per-IP fixed window; policy defined in Program.cs
 public class AssistantController : ControllerBase
 {
     private readonly IRagClient _ragClient;
