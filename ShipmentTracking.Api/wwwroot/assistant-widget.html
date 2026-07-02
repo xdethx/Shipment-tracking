@@ -1,0 +1,380 @@
+<!--
+  CUSTOMS ASSISTANT WIDGET
+  ========================
+  Self-contained fragment: no <html>/<head>/<body>, no library tags.
+  Requires: Bootstrap 5.3.3 CSS + jQuery 3.7.1 already loaded on the host page.
+
+  To embed on any page (index, admin, …), add these two lines AFTER jQuery loads:
+
+      <div id="assistant-widget-mount"></div>
+      <script>$(function(){ $('#assistant-widget-mount').load('/assistant-widget.html'); });</script>
+
+  jQuery .load() injects this fragment and executes the inline <script>
+  (no selector suffix → globalEval path runs scripts).
+  The IIFE + asst- prefixed IDs ensure nothing leaks to the host page's scope or DOM.
+-->
+<style>
+  /* ── Launcher button ─────────────────────────────────────────────────── */
+  #asst-launcher {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1050;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background-color: #0d6efd;   /* Bootstrap primary */
+    border: none;
+    color: #fff;
+    font-size: 1.4rem;
+    line-height: 1;
+    box-shadow: 0 4px 12px rgba(0,0,0,.20);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color .15s ease, box-shadow .15s ease;
+  }
+  #asst-launcher:hover { background-color: #0b5ed7; box-shadow: 0 6px 16px rgba(0,0,0,.25); }
+  #asst-launcher:active { background-color: #0a58ca; }
+
+  /* ── Floating panel ──────────────────────────────────────────────────── */
+  #asst-panel {
+    position: fixed;
+    bottom: 90px;               /* sits just above the button */
+    right: 20px;
+    z-index: 1050;
+    width: 360px;
+    max-width: calc(100vw - 40px);  /* never overflow on small screens */
+    height: 70vh;
+    max-height: 560px;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 12px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.15);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+
+    /* ── Open/close animation ─────────────────────────────────────────── */
+    /* Default: collapsed — invisible, not interactable, scaled down from BR corner. */
+    opacity: 0;
+    transform: scale(.85);
+    transform-origin: bottom right;
+    pointer-events: none;
+    visibility: hidden;
+    transition: transform .18s ease, opacity .18s ease, visibility 0s linear .18s;
+  }
+  /* .asst-open: fully expanded — add/remove this single class to animate. */
+  #asst-panel.asst-open {
+    opacity: 1;
+    transform: scale(1);
+    pointer-events: auto;
+    visibility: visible;
+    transition: transform .18s ease, opacity .18s ease, visibility 0s linear 0s;
+  }
+
+  /* ── Panel header ────────────────────────────────────────────────────── */
+  #asst-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid #dee2e6;
+    flex-shrink: 0;
+    background: #f8f9fa;
+    border-radius: 12px 12px 0 0;
+  }
+
+  /* ── Panel body (scrolls independently) ─────────────────────────────── */
+  #asst-panel-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 12px;
+  }
+
+  /* ── Message bubbles (same shape as standalone assistant.html) ───────── */
+  .asst-msg { margin-bottom: 12px; }
+  .asst-bubble {
+    display: inline-block;
+    padding: 8px 12px;
+    border-radius: 12px;
+    max-width: 85%;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-size: .92rem;
+  }
+  .asst-msg-user { text-align: right; }
+  .asst-msg-user .asst-bubble { background: #0d6efd; color: #fff; border-bottom-right-radius: 2px; }
+  .asst-msg-bot  .asst-bubble { background: #e9ecef; color: #212529; border-bottom-left-radius: 2px; }
+  .asst-sources  { margin-top: 5px; }
+  .asst-sources .badge { font-weight: 500; }
+
+  /* ── Input row ───────────────────────────────────────────────────────── */
+  #asst-input-row {
+    padding: 8px 12px;
+    border-top: 1px solid #dee2e6;
+    flex-shrink: 0;
+  }
+</style>
+
+<!-- ── Widget root ────────────────────────────────────────────────────────── -->
+<div id="asst-widget">
+
+  <!-- Launcher button — always visible, fixed to corner. 💬 is the chat glyph. -->
+  <button id="asst-launcher" title="Ask the Customs Assistant" aria-label="Open customs assistant">
+    💬
+  </button>
+
+  <!-- Floating panel — hidden until launcher is clicked. -->
+  <div id="asst-panel" role="dialog" aria-label="Customs assistant chat">
+
+    <!-- Header -->
+    <div id="asst-panel-header">
+      <div>
+        <strong class="d-block" style="font-size:.95rem;">Customs Assistant</strong>
+        <small id="asst-who" class="text-muted"></small>
+      </div>
+      <button id="asst-close" class="btn-close" aria-label="Close assistant"></button>
+    </div>
+
+    <!-- Body: identity gate + chat panel -->
+    <div id="asst-panel-body">
+
+      <!-- Identity form (soft UX gate — NOT a security boundary; see CLAUDE.md) -->
+      <div id="asst-identity">
+        <p class="text-muted small mb-3 mt-1">
+          Tell us who you are, then start chatting. We don't store any of this.
+        </p>
+        <div class="mb-2">
+          <label for="asst-username" class="form-label form-label-sm mb-1">Username</label>
+          <input id="asst-username" type="text" class="form-control form-control-sm"
+                 placeholder="Ahmet" />
+        </div>
+        <div class="mb-2">
+          <label for="asst-email" class="form-label form-label-sm mb-1">Email</label>
+          <input id="asst-email" type="email" class="form-control form-control-sm"
+                 placeholder="ahmet@example.com" />
+        </div>
+        <div class="mb-3">
+          <label for="asst-phone" class="form-label form-label-sm mb-1">Phone (GSM)</label>
+          <input id="asst-phone" type="tel" class="form-control form-control-sm"
+                 placeholder="+90 5xx xxx xx xx" />
+        </div>
+        <button id="asst-start" class="btn btn-primary btn-sm w-100">Start chatting</button>
+        <div id="asst-identity-result" class="mt-2"></div>
+      </div>
+
+      <!-- Chat view (hidden until identity gate passes) -->
+      <div id="asst-chat" class="d-none">
+        <div id="asst-messages"></div>
+      </div>
+
+    </div><!-- /#asst-panel-body -->
+
+    <!-- Input row (only shown in chat view) -->
+    <div id="asst-input-row" class="d-none">
+      <div class="input-group input-group-sm">
+        <input id="asst-input" type="text" class="form-control"
+               placeholder="e.g. What does CUS-HOLD mean?" autocomplete="off" />
+        <button id="asst-send" class="btn btn-primary" type="button">Send</button>
+      </div>
+    </div>
+
+  </div><!-- /#asst-panel -->
+</div><!-- /#asst-widget -->
+
+<script>
+// IIFE: nothing leaks to global scope. $ is the host page's jQuery.
+// All element IDs are asst-prefixed to stay unique in any host document.
+(function ($) {
+
+  // ── Identity (client-only soft gate) ───────────────────────────────────────
+  // Never persisted, never sent. The real security boundary is the per-IP
+  // rate limit on /api/assistant/ask (M4.2 Part A).
+  var identity = null;
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  // Private esc() — does NOT touch any global esc on the host page.
+  function esc(str) {
+    return $('<div>').text(String(str)).html();
+  }
+
+  function showIdentityAlert(type, message) {
+    $('#asst-identity-result').html(
+      '<div class="alert alert-' + type + ' py-1 mb-0 mt-1 small">' + esc(message) + '</div>'
+    );
+  }
+
+  function isValidEmail(v) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  }
+  function isValidPhone(v) {
+    if (!/^[0-9+()\-\s]+$/.test(v)) return false;
+    var digits = v.replace(/\D/g, '');
+    return digits.length >= 7 && digits.length <= 15;
+  }
+
+  // ── Open / close toggle ────────────────────────────────────────────────────
+  // CSS transition on #asst-panel handles the visual animation: toggling
+  // .asst-open drives transform:scale(.85→1) + opacity(0→1) over 180ms.
+  $('#asst-launcher').on('click', function () {
+    $('#asst-panel').addClass('asst-open');
+    // Focus the right field based on current state.
+    if (!identity) {
+      $('#asst-username').trigger('focus');
+    } else {
+      $('#asst-input').trigger('focus');
+    }
+  });
+
+  $('#asst-close').on('click', function () {
+    $('#asst-panel').removeClass('asst-open');
+  });
+
+  // ── Identity gate → chat ───────────────────────────────────────────────────
+  function startChat() {
+    var username = $.trim($('#asst-username').val());
+    var email    = $.trim($('#asst-email').val());
+    var phone    = $.trim($('#asst-phone').val());
+
+    if (!username || !email || !phone) {
+      showIdentityAlert('warning', 'Username, email and phone are all required.');
+      return;
+    }
+    if (!isValidEmail(email)) {
+      showIdentityAlert('warning', 'Please enter a valid email address.');
+      return;
+    }
+    if (!isValidPhone(phone)) {
+      showIdentityAlert('warning', 'Please enter a valid phone number.');
+      return;
+    }
+
+    identity = { username: username, email: email, phone: phone };
+
+    $('#asst-identity').addClass('d-none');
+    $('#asst-chat').removeClass('d-none');
+    $('#asst-input-row').removeClass('d-none');
+    $('#asst-who').text(username);
+    $('#asst-input').trigger('focus');
+  }
+
+  $('#asst-start').on('click', startChat);
+  $('#asst-phone').on('keydown', function (e) { if (e.key === 'Enter') { startChat(); } });
+
+  // ── Message rendering ──────────────────────────────────────────────────────
+  function scrollToBottom() {
+    var el = document.getElementById('asst-messages');
+    if (el) { el.scrollTop = el.scrollHeight; }
+  }
+
+  function appendUserMessage(text) {
+    $('#asst-messages').append(
+      '<div class="asst-msg asst-msg-user">' +
+        '<div class="asst-bubble">' + esc(text) + '</div>' +
+      '</div>'
+    );
+    scrollToBottom();
+  }
+
+  // Renders the assistant answer + its source badges.
+  // Source field is "source" on the wire — verified live against /api/assistant/ask (M4.2).
+  function appendBotMessage(answer, sources) {
+    var sourcesHtml = '';
+    if (sources && sources.length) {
+      var seen = {};
+      var badges = [];
+      sources.forEach(function (s) {
+        var name = s && s.source ? s.source : '';
+        if (name && !seen[name]) {
+          seen[name] = true;
+          badges.push('<span class="badge text-bg-light border me-1 mb-1">' + esc(name) + '</span>');
+        }
+      });
+      if (badges.length) {
+        sourcesHtml =
+          '<div class="asst-sources mt-1">' +
+            '<small class="text-muted d-block mb-1">Sources:</small>' +
+            badges.join('') +
+          '</div>';
+      }
+    }
+    $('#asst-messages').append(
+      '<div class="asst-msg asst-msg-bot">' +
+        '<div class="asst-bubble">' + esc(answer) + '</div>' +
+        sourcesHtml +
+      '</div>'
+    );
+    scrollToBottom();
+  }
+
+  // Temporary spinner bubble; caller removes() it when the response arrives.
+  function appendThinking() {
+    var $el = $(
+      '<div class="asst-msg asst-msg-bot">' +
+        '<div class="asst-bubble">' +
+          '<span class="spinner-border spinner-border-sm me-2" ' +
+                'role="status" aria-hidden="true"></span>' +
+          'Assistant is thinking…' +
+        '</div>' +
+      '</div>'
+    );
+    $('#asst-messages').append($el);
+    scrollToBottom();
+    return $el;
+  }
+
+  // ── Send a question ────────────────────────────────────────────────────────
+  // Calls ONLY /api/assistant/ask — RAG key stays server-side.
+  // 100s timeout matches the server-side RAG timeout for cold HF Spaces.
+  function sendMessage() {
+    var question = $.trim($('#asst-input').val());
+    if (!question) { return; }
+
+    appendUserMessage(question);
+    $('#asst-input').val('');
+    $('#asst-send').prop('disabled', true);
+    var $thinking = appendThinking();
+
+    $.ajax({
+      url: '/api/assistant/ask',
+      method: 'POST',
+      contentType: 'application/json',
+      data: JSON.stringify({ question: question }),
+      timeout: 100000
+    })
+    .done(function (data) {
+      $thinking.remove();
+      appendBotMessage(data.answer, data.sources);
+    })
+    .fail(function (jqXHR, textStatus) {
+      $thinking.remove();
+      var message;
+      if (jqXHR.status === 429) {
+        message = "You're sending messages too fast, please wait a moment.";
+      } else if (jqXHR.status === 502 || jqXHR.status === 503) {
+        message = 'Assistant is temporarily unavailable, try again shortly.';
+      } else if (textStatus === 'timeout' || jqXHR.status === 0) {
+        message = 'Assistant is temporarily unavailable, try again shortly.';
+      } else {
+        message = 'Something went wrong. Please try again.';
+      }
+      $('#asst-messages').append(
+        '<div class="asst-msg asst-msg-bot">' +
+          '<div class="asst-bubble text-danger">' + esc(message) + '</div>' +
+        '</div>'
+      );
+      scrollToBottom();
+    })
+    .always(function () {
+      $('#asst-send').prop('disabled', false);
+      $('#asst-input').trigger('focus');
+    });
+  }
+
+  $('#asst-send').on('click', sendMessage);
+  $('#asst-input').on('keydown', function (e) { if (e.key === 'Enter') { sendMessage(); } });
+
+})(jQuery);
+</script>

@@ -143,6 +143,17 @@
     $('#trackingInput').on('keydown', function (e) {
       if (e.key === 'Enter') { trackShipment(); }
     });
+
+    // Mount the customs assistant floating widget (bottom-right corner) after the DOM is ready.
+    // Copy-paste embed snippet for other pages lives in assistant-widget.html's header comment.
+    $(function () { $('#assistant-widget-mount').load('/assistant-widget.html'); });
   </script>
+
+  <!-- Widget mount point. The floating 💬 button is injected here at DOMReady.
+       To add the widget to any other Bootstrap + jQuery page, paste before </body>:
+         <div id="assistant-widget-mount"></div>
+         <script>$(function(){ $('#assistant-widget-mount').load('/assistant-widget.html'); });</script>
+  -->
+  <div id="assistant-widget-mount"></div>
 </body>
 </html>

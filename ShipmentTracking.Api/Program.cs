@@ -1,6 +1,8 @@
 using System.Net.Http.Headers;
 using System.Text;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -70,6 +72,51 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 builder.Services.AddAuthorization();
 
+// ── Rate limiting (public assistant endpoint only) ────────────────────────────
+// Built into ASP.NET Core (no NuGet, no background worker) — request-scoped middleware
+// with in-process counters. Counters live in this instance's memory, which is exactly
+// right for a single Render instance. Only the anonymous, RAG-backed assistant endpoint
+// needs throttling; the rest of the app is JWT-gated and low-traffic.
+const string AssistantRateLimitPolicy = "assistant";
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy(AssistantRateLimitPolicy, httpContext =>
+    {
+        // Partition by client IP so one caller can't starve others. Behind Render's proxy
+        // the real client is the LEFTMOST value of X-Forwarded-For; fall back to the socket
+        // address for local dev where no proxy header is present.
+        var forwardedFor = httpContext.Request.Headers["X-Forwarded-For"].ToString();
+        var clientIp = !string.IsNullOrWhiteSpace(forwardedFor)
+            ? forwardedFor.Split(',')[0].Trim()
+            : httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        // Fixed window: 20 permits / 1 minute. The window itself IS the cooldown — once a
+        // client spends its 20 permits it waits until the window rolls over. No queuing:
+        // requests over the limit are rejected immediately rather than delayed.
+        return RateLimitPartition.GetFixedWindowLimiter(clientIp, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 20,
+            Window      = TimeSpan.FromMinutes(1),
+            QueueLimit  = 0,
+        });
+    });
+
+    // Safe rejection: 429 + a small JSON message (never leak internals) and a Retry-After
+    // header when the limiter can tell us how long until the window resets.
+    options.OnRejected = async (context, ct) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+            context.HttpContext.Response.Headers.RetryAfter =
+                ((int)retryAfter.TotalSeconds).ToString();
+
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new { message = "Too many requests, please wait a moment." }, ct);
+    };
+});
+
 // ── RAG settings ─────────────────────────────────────────────────────────────
 // Rag:ApiKey is a SECRET — comes from user-secrets locally / Rag__ApiKey env var on Render.
 // Rag:BaseUrl is non-secret and lives in appsettings.json.
@@ -121,6 +168,7 @@ app.UseDefaultFiles();   // rewrites "/" -> "/index.html"
 app.UseStaticFiles();    // serves everything under wwwroot
 app.UseAuthentication(); // must come before UseAuthorization
 app.UseAuthorization();
+app.UseRateLimiter();    // after auth, before endpoints; policy is applied per-controller
 app.MapControllers();
 
 app.Run();
